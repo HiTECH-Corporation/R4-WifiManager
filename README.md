@@ -1,13 +1,11 @@
 # HiTECH R4 WiFi Manager
 
-[![Platform](https://img.shields.io/badge/platform-Arduino%20Uno%20R4%20WiFi-00979D.svg)](#hardware-compatibility)
-[![Architecture](https://img.shields.io/badge/architecture-Non--Blocking%20FSM-2E7D32.svg)](#architecture)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Language](https://img.shields.io/badge/language-C%2B%2B-f34b7d.svg)](#api-reference)
+[![Platform](https://img.shields.io/badge/Platform-Arduino%20Uno%20R4%20WiFi-00979D.svg)](#hardware-compatibility)
+[![Architecture](https://img.shields.io/badge/Architecture-Non--Blocking%20FSM-2E7D32.svg)](#architecture)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Language](https://img.shields.io/badge/Language-C%2B%2B-f34b7d.svg)](#api-reference)
 
-Industrial-grade, fully asynchronous WiFi configuration library for Arduino Uno R4 WiFi.
-
-HiTECH R4 WiFi Manager eliminates hardcoded credentials with a modern captive portal, while keeping `loop()` responsive through a non-blocking finite-state architecture powered by native `WiFiS3` and Renesas APIs.
+**HiTECH R4 WiFi Manager** eliminates hardcoded credentials with a modern captive portal, while keeping `loop()` responsive through a non-blocking finite-state architecture powered by native `WiFiS3` and Renesas APIs.
 
 ## Table of Contents
 
