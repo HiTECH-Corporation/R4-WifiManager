@@ -96,7 +96,7 @@ Not supported:
 
 ### Manual Installation
 
-1. Download the latest release ZIP.
+1. Go to **Github Repository**, click on **Code > Local > Download ZIP**.
 2. In Arduino IDE, open **Sketch > Include Library > Add .ZIP Library...**
 3. Select the downloaded ZIP file.
 
