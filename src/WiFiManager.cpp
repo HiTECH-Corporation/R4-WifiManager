@@ -11,19 +11,8 @@ WiFiManager::WiFiManager()
     _customHTML = captive_portal_html;
     _keepServerAlive = true;
     _currentStatus = STATUS_IDLE;
-
     _reconnectAttempts = 0;
-    _reconnectStep = 0;
-    _reconnectTimer = 0;
-
-    _clientActive = false;
-    _clientTimeout = 0;
-    _isBody = false;
-    _contentLength = 0;
-
-    _pendingReset = false;
-    _resetTime = 0;
-
+    _lastReconnectTime = 0;
     _numParams = 0;
     _apCallback = nullptr;
     _saveCallback = nullptr;
@@ -86,7 +75,7 @@ String WiFiManager::getParameter(const char *id)
 {
     EEPROMData data;
     loadCredentials(data);
-    if (strncmp(data.magic, "HTC2", 4) == 0)
+    if (strcmp(data.magic, "HTC2") == 0)
     {
         for (int i = 0; i < 5; i++)
         {
@@ -125,7 +114,7 @@ void WiFiManager::saveCredentials(const String &ssid, const String &password, EE
     EEPROMData existingData;
     loadCredentials(existingData);
 
-    if (strncmp(existingData.magic, "HTC2", 4) == 0)
+    if (strcmp(existingData.magic, "HTC2") == 0)
     {
         bool found = false;
         for (int i = 0; i < 3; i++)
@@ -195,11 +184,8 @@ bool WiFiManager::autoConnect(const char *apName, const char *apPassword)
     EEPROMData data;
     loadCredentials(data);
 
-    if (strncmp(data.magic, "HTC2", 4) == 0)
+    if (strcmp(data.magic, "HTC2") == 0)
     {
-        WiFi.disconnect();
-        delay(100);
-
         if (data.useStaticIP)
         {
             IPAddress ip(data.staticIP);
@@ -215,16 +201,7 @@ bool WiFiManager::autoConnect(const char *apName, const char *apPassword)
             if (strlen(data.profiles[i].ssid) > 0)
             {
                 _currentStatus = STATUS_CONNECTING;
-
-                if (strlen(data.profiles[i].password) > 0)
-                {
-                    WiFi.begin(data.profiles[i].ssid, data.profiles[i].password);
-                }
-                else
-                {
-                    WiFi.begin(data.profiles[i].ssid);
-                }
-
+                WiFi.begin(data.profiles[i].ssid, data.profiles[i].password);
                 delay(500);
 
                 unsigned long startAttemptTime = millis();
@@ -246,7 +223,7 @@ bool WiFiManager::autoConnect(const char *apName, const char *apPassword)
             _currentStatus = STATUS_CONNECTED;
 
             unsigned long ipWaitTime = millis();
-            while ((uint32_t)WiFi.localIP() == 0 && millis() - ipWaitTime < 10000)
+            while (WiFi.localIP().toString() == "0.0.0.0" && millis() - ipWaitTime < 5000)
             {
                 delay(100);
             }
@@ -283,9 +260,6 @@ void WiFiManager::startAP()
     if (_apCallback)
         _apCallback();
 
-    WiFi.disconnect();
-    delay(100);
-
     if (_apPassword.length() >= 8)
     {
         WiFi.beginAP(_apName.c_str(), _apPassword.c_str());
@@ -303,220 +277,152 @@ void WiFiManager::startAP()
 
 void WiFiManager::process()
 {
-    if (_pendingReset)
-    {
-        if (millis() - _resetTime > 1000)
-        {
-            NVIC_SystemReset();
-        }
-        return;
-    }
-
     if (_currentStatus == STATUS_CONNECTED)
     {
         if (WiFi.status() != WL_CONNECTED)
         {
             _currentStatus = STATUS_RECONNECTING;
             _reconnectAttempts = 0;
-            _reconnectStep = 0;
+            _lastReconnectTime = millis();
+
+            EEPROMData data;
+            loadCredentials(data);
+            WiFi.begin(data.profiles[0].ssid, data.profiles[0].password);
         }
     }
     else if (_currentStatus == STATUS_RECONNECTING)
     {
-        unsigned long now = millis();
-        if (_reconnectStep == 0)
+        if (WiFi.status() == WL_CONNECTED)
         {
-            WiFi.disconnect();
-            _reconnectTimer = now;
-            _reconnectStep = 1;
-        }
-        else if (_reconnectStep == 1 && now - _reconnectTimer > 100)
-        {
-            EEPROMData data;
-            loadCredentials(data);
-            if (strlen(data.profiles[0].password) > 0)
+            _currentStatus = STATUS_CONNECTED;
+
+            if (_keepServerAlive)
             {
-                WiFi.begin(data.profiles[0].ssid, data.profiles[0].password);
+                if (_server == nullptr)
+                {
+                    _server = new WiFiServer(_serverPort);
+                    _server->begin();
+                }
             }
             else
             {
-                WiFi.begin(data.profiles[0].ssid);
-            }
-            _reconnectTimer = now;
-            _reconnectStep = 2;
-        }
-        else if (_reconnectStep == 2)
-        {
-            if (WiFi.status() == WL_CONNECTED)
-            {
-                _reconnectTimer = now;
-                _reconnectStep = 3;
-            }
-            else if (now - _reconnectTimer > 10000)
-            {
-                _reconnectAttempts++;
-                if (_reconnectAttempts >= 3)
+                if (_server != nullptr)
                 {
-                    startAP();
-                }
-                else
-                {
-                    _reconnectStep = 0;
+                    delete _server;
+                    _server = nullptr;
                 }
             }
         }
-        else if (_reconnectStep == 3)
+        else if (millis() - _lastReconnectTime > 5000)
         {
-            if ((uint32_t)WiFi.localIP() != 0)
+            _reconnectAttempts++;
+            _lastReconnectTime = millis();
+
+            if (_reconnectAttempts >= 3)
             {
-                _currentStatus = STATUS_CONNECTED;
-                if (_keepServerAlive)
-                {
-                    if (_server == nullptr)
-                    {
-                        _server = new WiFiServer(_serverPort);
-                        _server->begin();
-                    }
-                }
-                else
-                {
-                    if (_server != nullptr)
-                    {
-                        delete _server;
-                        _server = nullptr;
-                    }
-                }
+                startAP();
             }
-            else if (now - _reconnectTimer > 10000)
+            else
             {
-                _reconnectAttempts++;
-                if (_reconnectAttempts >= 3)
-                {
-                    startAP();
-                }
-                else
-                {
-                    _reconnectStep = 0;
-                }
+                EEPROMData data;
+                loadCredentials(data);
+                WiFi.begin(data.profiles[0].ssid, data.profiles[0].password);
             }
         }
     }
 
     if (_server != nullptr)
     {
-        if (!_clientActive)
+        WiFiClient client = _server->available();
+        if (client)
         {
-            WiFiClient c = _server->available();
-            if (c)
-            {
-                _client = c;
-                _clientActive = true;
-                _clientTimeout = millis();
-                _currentLine = "";
-                _currentLine.reserve(128);
-                _requestMethod = "";
-                _requestPath = "";
-                _requestBody = "";
-                _requestBody.reserve(512);
-                _isBody = false;
-                _contentLength = 0;
-            }
-        }
-
-        if (_clientActive)
-        {
-            handleClient();
+            handleClient(client);
         }
     }
 }
 
-void WiFiManager::handleClient()
+void WiFiManager::handleClient(WiFiClient &client)
 {
-    if (!_client.connected() || millis() - _clientTimeout > 2000)
-    {
-        _client.stop();
-        _clientActive = false;
-        return;
-    }
+    String currentLine = "";
+    String requestMethod = "";
+    String requestPath = "";
+    String requestBody = "";
+    bool isBody = false;
+    int contentLength = 0;
 
-    while (_client.available())
+    unsigned long timeout = millis();
+    while (client.connected() && millis() - timeout < 2000)
     {
-        char c = _client.read();
-
-        if (!_isBody)
+        if (client.available())
         {
-            if (c == '\n')
+            char c = client.read();
+
+            if (!isBody)
             {
-                if (_currentLine.length() == 0)
+                if (c == '\n')
                 {
-                    _isBody = true;
-                    if (_contentLength == 0)
+                    if (currentLine.length() == 0)
                     {
-                        processHttpRequest();
-                        return;
+                        isBody = true;
                     }
-                }
-                else
-                {
-                    if (_requestMethod == "")
+                    else
                     {
-                        int space1 = _currentLine.indexOf(' ');
-                        int space2 = _currentLine.indexOf(' ', space1 + 1);
-                        if (space1 != -1 && space2 != -1)
+                        if (requestMethod == "")
                         {
-                            _requestMethod = _currentLine.substring(0, space1);
-                            _requestPath = _currentLine.substring(space1 + 1, space2);
+                            int space1 = currentLine.indexOf(' ');
+                            int space2 = currentLine.indexOf(' ', space1 + 1);
+                            if (space1 != -1 && space2 != -1)
+                            {
+                                requestMethod = currentLine.substring(0, space1);
+                                requestPath = currentLine.substring(space1 + 1, space2);
+                            }
                         }
+                        else if (currentLine.startsWith("Content-Length: "))
+                        {
+                            contentLength = currentLine.substring(16).toInt();
+                        }
+                        currentLine = "";
                     }
-                    else if (_currentLine.startsWith("Content-Length: "))
-                    {
-                        _contentLength = _currentLine.substring(16).toInt();
-                    }
-                    _currentLine = "";
+                }
+                else if (c != '\r')
+                {
+                    currentLine += c;
                 }
             }
-            else if (c != '\r')
+            else
             {
-                _currentLine += c;
-            }
-        }
-        else
-        {
-            _requestBody += c;
-            if (_requestBody.length() >= (size_t)_contentLength)
-            {
-                processHttpRequest();
-                return;
+                requestBody += c;
+                if (requestBody.length() >= contentLength)
+                {
+                    break;
+                }
             }
         }
     }
-}
 
-void WiFiManager::processHttpRequest()
-{
-    if (_requestPath.startsWith("/api/"))
+    if (requestPath.startsWith("/api/"))
     {
-        if (_requestMethod == "GET" && _requestPath == "/api/scan")
+        if (requestMethod == "GET" && requestPath == "/api/scan")
         {
-            sendResponse(_client, 200, "application/json", scanNetworksJSON());
+            sendResponse(client, 200, "application/json", scanNetworksJSON());
         }
-        else if (_requestMethod == "GET" && _requestPath == "/api/status")
+        else if (requestMethod == "GET" && requestPath == "/api/status")
         {
-            sendResponse(_client, 200, "application/json", getConnectionStatusJSON());
+            sendResponse(client, 200, "application/json", getConnectionStatusJSON());
         }
-        else if (_requestMethod == "GET" && _requestPath == "/api/info")
+        else if (requestMethod == "GET" && requestPath == "/api/info")
         {
-            sendResponse(_client, 200, "application/json", getSystemInfoJSON());
+            sendResponse(client, 200, "application/json", getSystemInfoJSON());
         }
-        else if (_requestMethod == "GET" && _requestPath == "/api/params")
+        else if (requestMethod == "GET" && requestPath == "/api/params")
         {
-            sendResponse(_client, 200, "application/json", getParamsJSON());
+            sendResponse(client, 200, "application/json", getParamsJSON());
         }
-        else if (_requestMethod == "POST" && _requestPath == "/api/connect")
+        else if (requestMethod == "POST" && requestPath == "/api/connect")
         {
-            String ssid = extractParam(_requestBody, "ssid");
-            String pass = extractParam(_requestBody, "password");
-            String useStaticStr = extractParam(_requestBody, "useStatic");
+            String ssid = extractParam(requestBody, "ssid");
+            String pass = extractParam(requestBody, "password");
+            String useStaticStr = extractParam(requestBody, "useStatic");
 
             if (ssid.length() > 0)
             {
@@ -527,10 +433,10 @@ void WiFiManager::processHttpRequest()
                 if (newData.useStaticIP)
                 {
                     IPAddress ip, gw, sn, dns;
-                    ip.fromString(extractParam(_requestBody, "ip"));
-                    gw.fromString(extractParam(_requestBody, "gw"));
-                    sn.fromString(extractParam(_requestBody, "sn"));
-                    dns.fromString(extractParam(_requestBody, "dns"));
+                    ip.fromString(extractParam(requestBody, "ip"));
+                    gw.fromString(extractParam(requestBody, "gw"));
+                    sn.fromString(extractParam(requestBody, "sn"));
+                    dns.fromString(extractParam(requestBody, "dns"));
                     newData.staticIP = (uint32_t)ip;
                     newData.staticGW = (uint32_t)gw;
                     newData.staticSN = (uint32_t)sn;
@@ -539,7 +445,7 @@ void WiFiManager::processHttpRequest()
 
                 for (int i = 0; i < _numParams; i++)
                 {
-                    String pVal = extractParam(_requestBody, _params[i].id);
+                    String pVal = extractParam(requestBody, _params[i].id);
                     strncpy(newData.params[i].id, _params[i].id.c_str(), 31);
                     strncpy(newData.params[i].value, pVal.c_str(), 64);
                 }
@@ -548,34 +454,35 @@ void WiFiManager::processHttpRequest()
                     _saveCallback();
                 saveCredentials(ssid, pass, newData);
 
-                sendResponse(_client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Credentials saved. Device will now reboot.\"}");
-                _pendingReset = true;
-                _resetTime = millis();
+                sendResponse(client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Credentials saved. Device will now reboot.\"}");
+                client.stop();
+                delay(1000);
+                NVIC_SystemReset();
             }
             else
             {
-                sendResponse(_client, 400, "application/json", "{\"status\":\"error\",\"message\":\"Missing SSID.\"}");
+                sendResponse(client, 400, "application/json", "{\"status\":\"error\",\"message\":\"Missing SSID.\"}");
             }
         }
-        else if (_requestMethod == "POST" && _requestPath == "/api/reset")
+        else if (requestMethod == "POST" && requestPath == "/api/reset")
         {
             resetSettings();
-            sendResponse(_client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Settings cleared.\"}");
-            _pendingReset = true;
-            _resetTime = millis();
+            sendResponse(client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Settings cleared.\"}");
+            client.stop();
+            delay(1000);
+            NVIC_SystemReset();
         }
         else
         {
-            sendResponse(_client, 404, "text/plain", "Endpoint Not Found");
+            sendResponse(client, 404, "text/plain", "Endpoint Not Found");
         }
     }
     else
     {
-        sendResponse(_client, 200, "text/html", _customHTML);
+        sendResponse(client, 200, "text/html", _customHTML);
     }
 
-    _client.stop();
-    _clientActive = false;
+    client.stop();
 }
 
 String WiFiManager::extractParam(const String &body, const String &param)
@@ -593,7 +500,6 @@ String WiFiManager::extractParam(const String &body, const String &param)
     value.replace("+", " ");
 
     String decoded = "";
-    decoded.reserve(value.length());
     for (int i = 0; i < value.length(); i++)
     {
         if (value[i] == '%' && i + 2 < value.length())
@@ -616,9 +522,7 @@ String WiFiManager::scanNetworksJSON()
     if (numNetworks == 0)
         return "[]";
 
-    String json;
-    json.reserve(numNetworks * 96 + 16);
-    json = "[";
+    String json = "[";
     for (int i = 0; i < numNetworks; i++)
     {
         json += "{";
@@ -635,15 +539,13 @@ String WiFiManager::scanNetworksJSON()
 
 String WiFiManager::getParamsJSON()
 {
-    String json;
-    json.reserve(_numParams * 128 + 16);
-    json = "[";
+    String json = "[";
     EEPROMData data;
     loadCredentials(data);
     for (int i = 0; i < _numParams; i++)
     {
         String val = _params[i].defaultValue;
-        if (strncmp(data.magic, "HTC2", 4) == 0)
+        if (strcmp(data.magic, "HTC2") == 0)
         {
             for (int j = 0; j < 5; j++)
             {
@@ -691,9 +593,7 @@ String WiFiManager::getSystemInfoJSON()
     String cpuStr = "Renesas RA4M1 @ " + String(SystemCoreClock / 1000000) + "MHz";
     String boardStr = "Arduino UNO R4 WiFi (UID: " + getDeviceUID().substring(0, 8) + ")";
 
-    String json;
-    json.reserve(256);
-    json = "{";
+    String json = "{";
     json += "\"board\":\"" + boardStr + "\",";
     json += "\"cpu\":\"" + cpuStr + "\",";
     json += "\"ram\":\"" + ramStr + "\",";
@@ -745,9 +645,7 @@ String WiFiManager::getConnectionStatusJSON()
         break;
     }
 
-    String json;
-    json.reserve(128);
-    json = "{";
+    String json = "{";
     json += "\"status\":\"" + statusStr + "\"";
     if (_currentStatus == STATUS_CONNECTED)
     {

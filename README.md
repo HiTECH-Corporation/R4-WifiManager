@@ -59,7 +59,7 @@ flowchart LR
     G --> H[User Submits Credentials]
     H --> I[Save to EEPROM]
     I --> D
-    F --> J[process in loop]
+    F --> J[Process in loop]
     G --> J
 ```
 
@@ -101,7 +101,7 @@ Not supported:
 ## Quick Start
 
 ```cpp
-#include <WiFiManager.h>
+#include <HiTECH_R4_Wifi_Manager.h>
 
 WiFiManager wifiManager;
 

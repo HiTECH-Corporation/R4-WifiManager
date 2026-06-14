@@ -1,4 +1,4 @@
-#include <WiFiManager.h>
+#include <HiTECH_R4_Wifi_Manager.h>
 
 WiFiManager wifiManager;
 
