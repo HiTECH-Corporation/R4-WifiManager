@@ -50,7 +50,7 @@ private:
 
     uint8_t _reconnectAttempts;
     uint8_t _reconnectStep;
-    unsigned long _reconnectTimer;
+    unsigned long _lastReconnectTime;
 
     WiFiClient _client;
     bool _clientActive;
@@ -104,7 +104,7 @@ private:
     WiFiManagerCallback _connectCallback;
 
     void startAP();
-    void handleClient();
+    void handleClient(WiFiClient &client);
     void processHttpRequest();
     void sendResponse(WiFiClient &client, int code, const String &contentType, const char *content);
     void sendResponse(WiFiClient &client, int code, const String &contentType, const String &content);
