@@ -6,6 +6,14 @@ The format is inspired by Keep a Changelog and semantic versioning conventions.
 
 ## [Unreleased]
 
+## [2026.6.15] - 2026-06-15
+
+### Fixed
+
+- Resolved variable declaration mismatch (`_lastReconnectTime` replacing `_reconnectTimer`) in header file.
+- Corrected `handleClient(WiFiClient &client)` function signature mismatch to ensure proper asynchronous processing.
+- Synchronized `WiFiManager.cpp` and `WiFiManager.h` structure for Arduino compilation stability.
+
 ### Changed
 
 - Updated library metadata to match Arduino Library Manager best practices.
