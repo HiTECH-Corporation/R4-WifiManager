@@ -41,6 +41,8 @@ This project is designed to:
 - **Non-blocking HTTP handling**: Client processing is buffered and event-driven to avoid lockups.
 - **Memory-fragmentation mitigation**: Uses `String::reserve()` in critical paths to stabilize heap behavior.
 - **Hardware-level telemetry**: Exposes board-level details such as free SRAM and unique device identity.
+- **Captive Portal DNS Server**: Built-in lightweight Async DNS server forces OS-level login prompts on iOS, Android, and Windows.
+- **mDNS Support**: Reach your portal easily via `http://r4wm.local`.
 - **Embedded SPA captive portal**: Lightweight, modern UI with custom runtime parameters.
 - **Custom fields and persistent config**: Parameterized form inputs (for example MQTT host, node ID) are stored in EEPROM.
 - **Credential obfuscation**: EEPROM payload uses XOR obfuscation to avoid plain-text storage.
@@ -178,7 +180,7 @@ Important notes:
 
 ### Base URL
 
-- AP mode: `http://192.168.4.1`
+- AP mode: `http://192.168.4.1` or `http://r4wm.local`
 - Custom port example: `http://192.168.4.1:8080`
 
 ### Endpoint Matrix

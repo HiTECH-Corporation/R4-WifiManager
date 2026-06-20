@@ -286,6 +286,7 @@ void WiFiManager::startAP()
     _server->begin();
     
     _dnsServer.begin(53);
+    _mDnsServer.begin(5353);
 }
 
 void WiFiManager::processDNS()
@@ -313,11 +314,69 @@ void WiFiManager::processDNS()
             192, 168, 4, 1
         };
         IPAddress apIP = WiFi.localIP();
-        if (apIP) {
-            ans[12] = apIP[0]; ans[13] = apIP[1]; ans[14] = apIP[2]; ans[15] = apIP[3];
+        if (!apIP || apIP[0] == 0) {
+            apIP = IPAddress(192, 168, 4, 1);
         }
+        ans[12] = apIP[0]; ans[13] = apIP[1]; ans[14] = apIP[2]; ans[15] = apIP[3];
         _dnsServer.write(ans, 16);
         _dnsServer.endPacket();
+    }
+}
+
+void WiFiManager::processMDNS()
+{
+    int packetSize = _mDnsServer.parsePacket();
+    if (packetSize > 0 && packetSize <= 512)
+    {
+        uint8_t buf[512];
+        _mDnsServer.read(buf, packetSize);
+        
+        const uint8_t searchStr[] = {0x04, 'r', '4', 'w', 'm', 0x05, 'l', 'o', 'c', 'a', 'l', 0x00};
+        bool found = false;
+        for (int i = 12; i < packetSize - (int)sizeof(searchStr); i++)
+        {
+            if (memcmp(buf + i, searchStr, sizeof(searchStr)) == 0)
+            {
+                found = true;
+                break;
+            }
+        }
+        
+        if (found)
+        {
+            uint8_t ans[256];
+            memset(ans, 0, sizeof(ans));
+            ans[0] = buf[0]; ans[1] = buf[1];
+            ans[2] = 0x84; ans[3] = 0x00;
+            ans[4] = 0; ans[5] = 0;
+            ans[6] = 0; ans[7] = 1;
+            ans[8] = 0; ans[9] = 0;
+            ans[10] = 0; ans[11] = 0;
+            
+            int idx = 12;
+            memcpy(ans + idx, searchStr, sizeof(searchStr));
+            idx += sizeof(searchStr);
+            
+            ans[idx++] = 0x00; ans[idx++] = 0x01;
+            ans[idx++] = 0x80; ans[idx++] = 0x01;
+            ans[idx++] = 0x00; ans[idx++] = 0x00; ans[idx++] = 0x00; ans[idx++] = 0x78;
+            ans[idx++] = 0x00; ans[idx++] = 0x04;
+            
+            IPAddress apIP = WiFi.localIP();
+            if (!apIP || apIP[0] == 0) {
+                apIP = IPAddress(192, 168, 4, 1);
+            }
+            ans[idx++] = apIP[0]; ans[idx++] = apIP[1]; ans[idx++] = apIP[2]; ans[idx++] = apIP[3];
+            
+            IPAddress mDNSIP(224, 0, 0, 251);
+            _mDnsServer.beginPacket(mDNSIP, 5353);
+            _mDnsServer.write(ans, idx);
+            _mDnsServer.endPacket();
+            
+            _mDnsServer.beginPacket(_mDnsServer.remoteIP(), _mDnsServer.remotePort());
+            _mDnsServer.write(ans, idx);
+            _mDnsServer.endPacket();
+        }
     }
 }
 
@@ -326,6 +385,7 @@ void WiFiManager::process()
     if (_currentStatus == STATUS_AP_MODE)
     {
         processDNS();
+        processMDNS();
     }
     else if (_currentStatus == STATUS_CONNECTED)
     {
@@ -587,9 +647,19 @@ void WiFiManager::processHttpRequest()
             sendResponse(_client, 404, "text/plain", "Endpoint Not Found");
         }
     }
-    else
+    else if (reqPath == "/" || reqPath == "/index.html")
     {
         sendResponse(_client, 200, "text/html", _customHTML);
+    }
+    else
+    {
+        IPAddress apIP = WiFi.localIP();
+        if (!apIP || apIP[0] == 0) apIP = IPAddress(192, 168, 4, 1);
+        String redirectUrl = "http://" + apIP.toString() + "/";
+        
+        _client.print("HTTP/1.1 302 Found\r\n");
+        _client.print("Location: " + redirectUrl + "\r\n");
+        _client.print("Connection: close\r\n\r\n");
     }
 }
 

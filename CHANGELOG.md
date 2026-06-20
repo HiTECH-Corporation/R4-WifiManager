@@ -8,6 +8,17 @@ The format is inspired by Keep a Changelog and semantic versioning conventions.
 
 ## [2026.6.20] - 2026-06-20
 
+### Added
+
+- **mDNS Responder**: Added UDP multicast responder for `r4wm.local` domain to enable easy local access without IP addresses.
+- **Captive Portal DNS Server**: Implemented a lightweight UDP DNS Server (port 53) to spoof DNS requests, triggering OS-level captive portal login prompts.
+
+### Changed
+
+- **Extreme RAM Optimization**: Completely removed all `String` object usage from internal class definitions and HTTP routing in favor of static `char[]` arrays.
+- **Asynchronous HTTP Server**: Rewrote `handleClient()` into a true non-blocking finite state machine (FSM), preventing slowloris attacks and loop blocking.
+- **HTTP 302 Redirect**: Replaced 200 OK responses with standard HTTP 302 Redirects for unrecognized paths to fully comply with Apple, Android, and Windows Captive Portal specifications.
+
 ### Fixed
 
 - Resolved critical bug where device failed to leave AP mode after saving credentials due to `strcmp` reading past non-null-terminated magic bytes. Switched to `strncmp` for `EEPROMData` struct magic signature validation.

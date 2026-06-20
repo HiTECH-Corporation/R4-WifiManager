@@ -54,6 +54,7 @@ private:
     unsigned long _lastReconnectTime;
 
     WiFiUDP _dnsServer;
+    WiFiUDP _mDnsServer;
 
     WiFiClient _client;
     bool _clientActive;
@@ -111,6 +112,7 @@ private:
     void startAP();
     void handleClient();
     void processDNS();
+    void processMDNS();
     void resetClientState();
     void processHttpRequest();
     void sendResponse(WiFiClient &client, int code, const String &contentType, const char *content);
