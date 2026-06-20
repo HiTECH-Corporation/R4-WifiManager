@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFiS3.h>
 #include <EEPROM.h>
+#include <WiFiUdp.h>
 
 class WiFiManager
 {
@@ -45,20 +46,24 @@ private:
     bool _keepServerAlive;
     SystemStatus _currentStatus;
 
-    String _apName;
-    String _apPassword;
+    char _apName[33];
+    char _apPassword[65];
 
     uint8_t _reconnectAttempts;
     uint8_t _reconnectStep;
     unsigned long _lastReconnectTime;
 
+    WiFiUDP _dnsServer;
+
     WiFiClient _client;
     bool _clientActive;
     unsigned long _clientTimeout;
-    String _currentLine;
-    String _requestMethod;
-    String _requestPath;
-    String _requestBody;
+    char _currentLine[256];
+    uint16_t _currentLineLen;
+    char _requestMethod[8];
+    char _requestPath[64];
+    char _requestBody[512];
+    uint16_t _requestBodyLen;
     bool _isBody;
     int _contentLength;
 
@@ -91,9 +96,9 @@ private:
 
     struct CustomParamDef
     {
-        String id;
-        String label;
-        String defaultValue;
+        char id[32];
+        char label[64];
+        char defaultValue[65];
     };
 
     CustomParamDef _params[5];
@@ -104,7 +109,9 @@ private:
     WiFiManagerCallback _connectCallback;
 
     void startAP();
-    void handleClient(WiFiClient &client);
+    void handleClient();
+    void processDNS();
+    void resetClientState();
     void processHttpRequest();
     void sendResponse(WiFiClient &client, int code, const String &contentType, const char *content);
     void sendResponse(WiFiClient &client, int code, const String &contentType, const String &content);
@@ -114,7 +121,7 @@ private:
     void saveCredentials(const String &ssid, const String &password, EEPROMData &newData);
     void obfuscateData(uint8_t *data, size_t len);
     String getEncryptionTypeString(int type);
-    String extractParam(const String &body, const String &param);
+    String extractParam(const char *body, const char *param);
     String getSystemInfoJSON();
     int getFreeMemory();
     String getDeviceUID();

@@ -17,12 +17,31 @@ WiFiManager::WiFiManager()
     _apCallback = nullptr;
     _saveCallback = nullptr;
     _connectCallback = nullptr;
+    memset(_apName, 0, sizeof(_apName));
+    memset(_apPassword, 0, sizeof(_apPassword));
+    _clientActive = false;
+    resetClientState();
 }
 
 WiFiManager::~WiFiManager()
 {
     if (_server != nullptr)
         delete _server;
+}
+
+void WiFiManager::resetClientState()
+{
+    if (_clientActive && _client) {
+        _client.stop();
+    }
+    _clientActive = false;
+    _currentLineLen = 0;
+    memset(_requestMethod, 0, sizeof(_requestMethod));
+    memset(_requestPath, 0, sizeof(_requestPath));
+    memset(_requestBody, 0, sizeof(_requestBody));
+    _requestBodyLen = 0;
+    _isBody = false;
+    _contentLength = 0;
 }
 
 void WiFiManager::setPort(uint16_t port)
@@ -64,9 +83,9 @@ void WiFiManager::addParameter(const char *id, const char *label, const char *de
 {
     if (_numParams < 5)
     {
-        _params[_numParams].id = String(id);
-        _params[_numParams].label = String(label);
-        _params[_numParams].defaultValue = String(defaultValue);
+        strncpy(_params[_numParams].id, id, 31);
+        strncpy(_params[_numParams].label, label, 63);
+        strncpy(_params[_numParams].defaultValue, defaultValue, 64);
         _numParams++;
     }
 }
@@ -79,7 +98,7 @@ String WiFiManager::getParameter(const char *id)
     {
         for (int i = 0; i < 5; i++)
         {
-            if (String(data.params[i].id) == String(id))
+            if (strcmp(data.params[i].id, id) == 0)
             {
                 return String(data.params[i].value);
             }
@@ -87,9 +106,9 @@ String WiFiManager::getParameter(const char *id)
     }
     for (int i = 0; i < _numParams; i++)
     {
-        if (_params[i].id == String(id))
+        if (strcmp(_params[i].id, id) == 0)
         {
-            return _params[i].defaultValue;
+            return String(_params[i].defaultValue);
         }
     }
     return "";
@@ -169,17 +188,9 @@ void WiFiManager::resetSettings()
 bool WiFiManager::autoConnect(const char *apName, const char *apPassword)
 {
     if (apName != nullptr)
-    {
-        _apName = String(apName);
-    }
+        strncpy(_apName, apName, 32);
     if (apPassword != nullptr)
-    {
-        _apPassword = String(apPassword);
-    }
-    else
-    {
-        _apPassword = "";
-    }
+        strncpy(_apPassword, apPassword, 64);
 
     EEPROMData data;
     loadCredentials(data);
@@ -260,24 +271,63 @@ void WiFiManager::startAP()
     if (_apCallback)
         _apCallback();
 
-    if (_apPassword.length() >= 8)
+    if (strlen(_apPassword) >= 8)
     {
-        WiFi.beginAP(_apName.c_str(), _apPassword.c_str());
+        WiFi.beginAP(_apName, _apPassword);
     }
     else
     {
-        WiFi.beginAP(_apName.c_str());
+        WiFi.beginAP(_apName);
     }
 
     if (_server != nullptr)
         delete _server;
     _server = new WiFiServer(_serverPort);
     _server->begin();
+    
+    _dnsServer.begin(53);
+}
+
+void WiFiManager::processDNS()
+{
+    int packetSize = _dnsServer.parsePacket();
+    if (packetSize > 0 && packetSize <= 512)
+    {
+        uint8_t buf[512];
+        _dnsServer.read(buf, packetSize);
+        if (packetSize < 12) return;
+        
+        buf[2] |= 0x80;
+        buf[3] |= 0x80;
+        buf[6] = 0; buf[7] = 1;
+        
+        _dnsServer.beginPacket(_dnsServer.remoteIP(), _dnsServer.remotePort());
+        _dnsServer.write(buf, packetSize);
+        
+        uint8_t ans[16] = {
+            0xC0, 0x0C,
+            0x00, 0x01,
+            0x00, 0x01,
+            0x00, 0x00, 0x00, 0x3C,
+            0x00, 0x04,
+            192, 168, 4, 1
+        };
+        IPAddress apIP = WiFi.localIP();
+        if (apIP) {
+            ans[12] = apIP[0]; ans[13] = apIP[1]; ans[14] = apIP[2]; ans[15] = apIP[3];
+        }
+        _dnsServer.write(ans, 16);
+        _dnsServer.endPacket();
+    }
 }
 
 void WiFiManager::process()
 {
-    if (_currentStatus == STATUS_CONNECTED)
+    if (_currentStatus == STATUS_AP_MODE)
+    {
+        processDNS();
+    }
+    else if (_currentStatus == STATUS_CONNECTED)
     {
         if (WiFi.status() != WL_CONNECTED)
         {
@@ -333,173 +383,112 @@ void WiFiManager::process()
 
     if (_server != nullptr)
     {
-        WiFiClient client = _server->available();
-        if (client)
+        if (!_clientActive)
         {
-            handleClient(client);
+            WiFiClient newClient = _server->available();
+            if (newClient)
+            {
+                _client = newClient;
+                _clientActive = true;
+                _clientTimeout = millis();
+            }
+        }
+        
+        if (_clientActive)
+        {
+            handleClient();
         }
     }
 }
 
-void WiFiManager::handleClient(WiFiClient &client)
+void WiFiManager::handleClient()
 {
-    String currentLine = "";
-    String requestMethod = "";
-    String requestPath = "";
-    String requestBody = "";
-    bool isBody = false;
-    int contentLength = 0;
-
-    unsigned long timeout = millis();
-    while (client.connected() && millis() - timeout < 2000)
+    if (!_client.connected())
     {
-        if (client.available())
-        {
-            char c = client.read();
-
-            if (!isBody)
-            {
-                if (c == '\n')
-                {
-                    if (currentLine.length() == 0)
-                    {
-                        isBody = true;
-                    }
-                    else
-                    {
-                        if (requestMethod == "")
-                        {
-                            int space1 = currentLine.indexOf(' ');
-                            int space2 = currentLine.indexOf(' ', space1 + 1);
-                            if (space1 != -1 && space2 != -1)
-                            {
-                                requestMethod = currentLine.substring(0, space1);
-                                requestPath = currentLine.substring(space1 + 1, space2);
-                            }
-                        }
-                        else if (currentLine.startsWith("Content-Length: "))
-                        {
-                            contentLength = currentLine.substring(16).toInt();
-                        }
-                        currentLine = "";
-                    }
-                }
-                else if (c != '\r')
-                {
-                    currentLine += c;
-                }
-            }
-            else
-            {
-                requestBody += c;
-                if (requestBody.length() >= contentLength)
-                {
-                    break;
-                }
-            }
-        }
+        resetClientState();
+        return;
+    }
+    if (millis() - _clientTimeout > 2000)
+    {
+        resetClientState();
+        return;
     }
 
-    if (requestPath.startsWith("/api/"))
+    while (_client.available() > 0)
     {
-        if (requestMethod == "GET" && requestPath == "/api/scan")
-        {
-            sendResponse(client, 200, "application/json", scanNetworksJSON());
-        }
-        else if (requestMethod == "GET" && requestPath == "/api/status")
-        {
-            sendResponse(client, 200, "application/json", getConnectionStatusJSON());
-        }
-        else if (requestMethod == "GET" && requestPath == "/api/info")
-        {
-            sendResponse(client, 200, "application/json", getSystemInfoJSON());
-        }
-        else if (requestMethod == "GET" && requestPath == "/api/params")
-        {
-            sendResponse(client, 200, "application/json", getParamsJSON());
-        }
-        else if (requestMethod == "POST" && requestPath == "/api/connect")
-        {
-            String ssid = extractParam(requestBody, "ssid");
-            String pass = extractParam(requestBody, "password");
-            String useStaticStr = extractParam(requestBody, "useStatic");
+        _clientTimeout = millis();
+        char c = _client.read();
 
-            if (ssid.length() > 0)
+        if (!_isBody)
+        {
+            if (c == '\n')
             {
-                EEPROMData newData;
-                memset(&newData, 0, sizeof(EEPROMData));
-
-                newData.useStaticIP = (useStaticStr == "true" || useStaticStr == "1");
-                if (newData.useStaticIP)
+                if (_currentLineLen == 0)
                 {
-                    IPAddress ip, gw, sn, dns;
-                    ip.fromString(extractParam(requestBody, "ip"));
-                    gw.fromString(extractParam(requestBody, "gw"));
-                    sn.fromString(extractParam(requestBody, "sn"));
-                    dns.fromString(extractParam(requestBody, "dns"));
-                    newData.staticIP = (uint32_t)ip;
-                    newData.staticGW = (uint32_t)gw;
-                    newData.staticSN = (uint32_t)sn;
-                    newData.staticDNS = (uint32_t)dns;
+                    _isBody = true;
                 }
-
-                for (int i = 0; i < _numParams; i++)
+                else
                 {
-                    String pVal = extractParam(requestBody, _params[i].id);
-                    strncpy(newData.params[i].id, _params[i].id.c_str(), 31);
-                    strncpy(newData.params[i].value, pVal.c_str(), 64);
+                    _currentLine[_currentLineLen] = '\0';
+                    if (strlen(_requestMethod) == 0)
+                    {
+                        sscanf(_currentLine, "%7s %63s", _requestMethod, _requestPath);
+                    }
+                    else if (strncmp(_currentLine, "Content-Length: ", 16) == 0 || strncmp(_currentLine, "content-length: ", 16) == 0)
+                    {
+                        _contentLength = atoi(_currentLine + 16);
+                    }
+                    _currentLineLen = 0;
                 }
-
-                if (_saveCallback)
-                    _saveCallback();
-                saveCredentials(ssid, pass, newData);
-
-                sendResponse(client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Credentials saved. Device will now reboot.\"}");
-                client.stop();
-                delay(1000);
-                NVIC_SystemReset();
             }
-            else
+            else if (c != '\r')
             {
-                sendResponse(client, 400, "application/json", "{\"status\":\"error\",\"message\":\"Missing SSID.\"}");
+                if (_currentLineLen < 255)
+                {
+                    _currentLine[_currentLineLen++] = c;
+                }
             }
-        }
-        else if (requestMethod == "POST" && requestPath == "/api/reset")
-        {
-            resetSettings();
-            sendResponse(client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Settings cleared.\"}");
-            client.stop();
-            delay(1000);
-            NVIC_SystemReset();
         }
         else
         {
-            sendResponse(client, 404, "text/plain", "Endpoint Not Found");
+            if (_requestBodyLen < 511 && _requestBodyLen < _contentLength)
+            {
+                _requestBody[_requestBodyLen++] = c;
+            }
+            if (_requestBodyLen >= _contentLength)
+            {
+                _requestBody[_requestBodyLen] = '\0';
+                processHttpRequest();
+                resetClientState();
+                return;
+            }
         }
     }
-    else
+    
+    if (_isBody && _contentLength == 0)
     {
-        sendResponse(client, 200, "text/html", _customHTML);
+        processHttpRequest();
+        resetClientState();
     }
-
-    client.stop();
 }
 
-String WiFiManager::extractParam(const String &body, const String &param)
+String WiFiManager::extractParam(const char *body, const char *param)
 {
-    String searchKey = param + "=";
-    int start = body.indexOf(searchKey);
+    String bodyStr = String(body);
+    String searchKey = String(param) + "=";
+    int start = bodyStr.indexOf(searchKey);
     if (start == -1)
         return "";
     start += searchKey.length();
-    int end = body.indexOf("&", start);
+    int end = bodyStr.indexOf("&", start);
     if (end == -1)
-        end = body.length();
+        end = bodyStr.length();
 
-    String value = body.substring(start, end);
+    String value = bodyStr.substring(start, end);
     value.replace("+", " ");
 
     String decoded = "";
+    decoded.reserve(value.length());
     for (int i = 0; i < value.length(); i++)
     {
         if (value[i] == '%' && i + 2 < value.length())
@@ -516,13 +505,103 @@ String WiFiManager::extractParam(const String &body, const String &param)
     return decoded;
 }
 
+void WiFiManager::processHttpRequest()
+{
+    String reqPath = String(_requestPath);
+    String reqMethod = String(_requestMethod);
+
+    if (reqPath.startsWith("/api/"))
+    {
+        if (reqMethod == "GET" && reqPath == "/api/scan")
+        {
+            sendResponse(_client, 200, "application/json", scanNetworksJSON());
+        }
+        else if (reqMethod == "GET" && reqPath == "/api/status")
+        {
+            sendResponse(_client, 200, "application/json", getConnectionStatusJSON());
+        }
+        else if (reqMethod == "GET" && reqPath == "/api/info")
+        {
+            sendResponse(_client, 200, "application/json", getSystemInfoJSON());
+        }
+        else if (reqMethod == "GET" && reqPath == "/api/params")
+        {
+            sendResponse(_client, 200, "application/json", getParamsJSON());
+        }
+        else if (reqMethod == "POST" && reqPath == "/api/connect")
+        {
+            String ssid = extractParam(_requestBody, "ssid");
+            String pass = extractParam(_requestBody, "password");
+            String useStaticStr = extractParam(_requestBody, "useStatic");
+
+            if (ssid.length() > 0)
+            {
+                EEPROMData newData;
+                memset(&newData, 0, sizeof(EEPROMData));
+
+                newData.useStaticIP = (useStaticStr == "true" || useStaticStr == "1");
+                if (newData.useStaticIP)
+                {
+                    IPAddress ip, gw, sn, dns;
+                    ip.fromString(extractParam(_requestBody, "ip"));
+                    gw.fromString(extractParam(_requestBody, "gw"));
+                    sn.fromString(extractParam(_requestBody, "sn"));
+                    dns.fromString(extractParam(_requestBody, "dns"));
+                    newData.staticIP = (uint32_t)ip;
+                    newData.staticGW = (uint32_t)gw;
+                    newData.staticSN = (uint32_t)sn;
+                    newData.staticDNS = (uint32_t)dns;
+                }
+
+                for (int i = 0; i < _numParams; i++)
+                {
+                    String pVal = extractParam(_requestBody, _params[i].id);
+                    strncpy(newData.params[i].id, _params[i].id, 31);
+                    strncpy(newData.params[i].value, pVal.c_str(), 64);
+                }
+
+                if (_saveCallback)
+                    _saveCallback();
+                saveCredentials(ssid, pass, newData);
+
+                sendResponse(_client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Credentials saved. Device will now reboot.\"}");
+                _client.stop();
+                delay(1000);
+                NVIC_SystemReset();
+            }
+            else
+            {
+                sendResponse(_client, 400, "application/json", "{\"status\":\"error\",\"message\":\"Missing SSID.\"}");
+            }
+        }
+        else if (reqMethod == "POST" && reqPath == "/api/reset")
+        {
+            resetSettings();
+            sendResponse(_client, 200, "application/json", "{\"status\":\"success\",\"message\":\"Settings cleared.\"}");
+            _client.stop();
+            delay(1000);
+            NVIC_SystemReset();
+        }
+        else
+        {
+            sendResponse(_client, 404, "text/plain", "Endpoint Not Found");
+        }
+    }
+    else
+    {
+        sendResponse(_client, 200, "text/html", _customHTML);
+    }
+}
+
 String WiFiManager::scanNetworksJSON()
 {
     int numNetworks = WiFi.scanNetworks();
     if (numNetworks == 0)
         return "[]";
 
-    String json = "[";
+    String json;
+    json.reserve(512 + numNetworks * 64);
+    json = "[";
     for (int i = 0; i < numNetworks; i++)
     {
         json += "{";
@@ -539,17 +618,19 @@ String WiFiManager::scanNetworksJSON()
 
 String WiFiManager::getParamsJSON()
 {
-    String json = "[";
+    String json;
+    json.reserve(512);
+    json = "[";
     EEPROMData data;
     loadCredentials(data);
     for (int i = 0; i < _numParams; i++)
     {
-        String val = _params[i].defaultValue;
+        String val = String(_params[i].defaultValue);
         if (strncmp(data.magic, "HTC2", 4) == 0)
         {
             for (int j = 0; j < 5; j++)
             {
-                if (String(data.params[j].id) == _params[i].id)
+                if (strcmp(data.params[j].id, _params[i].id) == 0)
                 {
                     if (strlen(data.params[j].value) > 0)
                     {
@@ -559,7 +640,7 @@ String WiFiManager::getParamsJSON()
                 }
             }
         }
-        json += "{\"id\":\"" + _params[i].id + "\",\"label\":\"" + _params[i].label + "\",\"value\":\"" + val + "\"}";
+        json += "{\"id\":\"" + String(_params[i].id) + "\",\"label\":\"" + String(_params[i].label) + "\",\"value\":\"" + val + "\"}";
         if (i < _numParams - 1)
             json += ",";
     }
@@ -593,7 +674,9 @@ String WiFiManager::getSystemInfoJSON()
     String cpuStr = "Renesas RA4M1 @ " + String(SystemCoreClock / 1000000) + "MHz";
     String boardStr = "Arduino UNO R4 WiFi (UID: " + getDeviceUID().substring(0, 8) + ")";
 
-    String json = "{";
+    String json;
+    json.reserve(256);
+    json = "{";
     json += "\"board\":\"" + boardStr + "\",";
     json += "\"cpu\":\"" + cpuStr + "\",";
     json += "\"ram\":\"" + ramStr + "\",";
@@ -606,20 +689,13 @@ String WiFiManager::getEncryptionTypeString(int type)
 {
     switch (type)
     {
-    case ENC_TYPE_NONE:
-        return "Open";
-    case ENC_TYPE_WEP:
-        return "WEP";
-    case ENC_TYPE_WPA:
-        return "WPA";
-    case ENC_TYPE_WPA2:
-        return "WPA2";
-    case ENC_TYPE_WPA3:
-        return "WPA3";
-    case ENC_TYPE_AUTO:
-        return "Auto";
-    default:
-        return "Unknown";
+    case ENC_TYPE_NONE: return "Open";
+    case ENC_TYPE_WEP: return "WEP";
+    case ENC_TYPE_WPA: return "WPA";
+    case ENC_TYPE_WPA2: return "WPA2";
+    case ENC_TYPE_WPA3: return "WPA3";
+    case ENC_TYPE_AUTO: return "Auto";
+    default: return "Unknown";
     }
 }
 
@@ -628,24 +704,16 @@ String WiFiManager::getConnectionStatusJSON()
     String statusStr = "UNKNOWN";
     switch (_currentStatus)
     {
-    case STATUS_IDLE:
-        statusStr = "IDLE";
-        break;
-    case STATUS_AP_MODE:
-        statusStr = "AP_MODE";
-        break;
-    case STATUS_CONNECTING:
-        statusStr = "CONNECTING";
-        break;
-    case STATUS_CONNECTED:
-        statusStr = "CONNECTED";
-        break;
-    case STATUS_RECONNECTING:
-        statusStr = "RECONNECTING";
-        break;
+    case STATUS_IDLE: statusStr = "IDLE"; break;
+    case STATUS_AP_MODE: statusStr = "AP_MODE"; break;
+    case STATUS_CONNECTING: statusStr = "CONNECTING"; break;
+    case STATUS_CONNECTED: statusStr = "CONNECTED"; break;
+    case STATUS_RECONNECTING: statusStr = "RECONNECTING"; break;
     }
 
-    String json = "{";
+    String json;
+    json.reserve(128);
+    json = "{";
     json += "\"status\":\"" + statusStr + "\"";
     if (_currentStatus == STATUS_CONNECTED)
     {
