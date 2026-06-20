@@ -75,7 +75,7 @@ String WiFiManager::getParameter(const char *id)
 {
     EEPROMData data;
     loadCredentials(data);
-    if (strcmp(data.magic, "HTC2") == 0)
+    if (strncmp(data.magic, "HTC2", 4) == 0)
     {
         for (int i = 0; i < 5; i++)
         {
@@ -114,7 +114,7 @@ void WiFiManager::saveCredentials(const String &ssid, const String &password, EE
     EEPROMData existingData;
     loadCredentials(existingData);
 
-    if (strcmp(existingData.magic, "HTC2") == 0)
+    if (strncmp(existingData.magic, "HTC2", 4) == 0)
     {
         bool found = false;
         for (int i = 0; i < 3; i++)
@@ -184,7 +184,7 @@ bool WiFiManager::autoConnect(const char *apName, const char *apPassword)
     EEPROMData data;
     loadCredentials(data);
 
-    if (strcmp(data.magic, "HTC2") == 0)
+    if (strncmp(data.magic, "HTC2", 4) == 0)
     {
         if (data.useStaticIP)
         {
@@ -545,7 +545,7 @@ String WiFiManager::getParamsJSON()
     for (int i = 0; i < _numParams; i++)
     {
         String val = _params[i].defaultValue;
-        if (strcmp(data.magic, "HTC2") == 0)
+        if (strncmp(data.magic, "HTC2", 4) == 0)
         {
             for (int j = 0; j < 5; j++)
             {

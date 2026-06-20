@@ -126,7 +126,7 @@ const char *captive_portal_html = R"=====(
   </main>
 
   <footer class="h-10 px-6 border-t border-[#eaeaea] bg-white flex items-center justify-between text-[10px] text-[#666] font-medium uppercase tracking-widest shrink-0">
-    <span id="footer-info-fw">2026.6.14</span>
+    <span id="footer-info-fw">2026.6.20</span>
     <div class="flex items-center space-x-6">
       <div class="flex items-center space-x-1.5"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M11 9h4a2 2 0 0 0 2-2V3" /><circle cx="9" cy="9" r="2" /><path d="M7 21v-4a2 2 0 0 1 2-2h4" /><circle cx="15" cy="15" r="2" /></svg><span id="footer-info-board">-</span></div>
       <div class="flex items-center space-x-1.5"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v2" /><path d="M12 2v2" /><path d="M17 20v2" /><path d="M17 2v2" /><path d="M2 12h2" /><path d="M2 17h2" /><path d="M2 7h2" /><path d="M20 12h2" /><path d="M20 17h2" /><path d="M20 7h2" /><path d="M7 20v2" /><path d="M7 2v2" /><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="8" y="8" width="8" height="8" rx="1" /></svg><span id="footer-info-cpu">-</span></div>

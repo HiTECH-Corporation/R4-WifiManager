@@ -6,6 +6,12 @@ The format is inspired by Keep a Changelog and semantic versioning conventions.
 
 ## [Unreleased]
 
+## [2026.6.20] - 2026-06-20
+
+### Fixed
+
+- Resolved critical bug where device failed to leave AP mode after saving credentials due to `strcmp` reading past non-null-terminated magic bytes. Switched to `strncmp` for `EEPROMData` struct magic signature validation.
+
 ## [2026.6.15] - 2026-06-15
 
 ### Fixed
